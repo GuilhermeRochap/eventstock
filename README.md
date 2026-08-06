@@ -10,7 +10,7 @@ Do lado do comprador, o usuário navega por eventos publicados, compra ingressos
 
 ### Por que esse projeto existe
 
-O EventStock foi concebido como um ambiente de prática para arquitetura de microsserviços do mundo real — não como um produto a ser vendido. O objetivo é aplicar, numa única base de código, conceitos que normalmente aparecem espalhados em projetos menores: autenticação segura e multi-tenant, filas de eventos assíncronas, jobs agendados, integração com gateways de pagamento (em sandbox), e um fluxo de aprovação organizacional completo.
+O EventStock foi concebido como um ambiente de prática para arquitetura de microsserviços do mundo real não como um produto a ser vendido. O objetivo é aplicar, numa única base de código, conceitos que normalmente aparecem espalhados em projetos menores: autenticação segura e multi-tenant, filas de eventos assíncronas, jobs agendados, integração com gateways de pagamento (em sandbox), e um fluxo de aprovação organizacional completo.
 
 ## Arquitetura
 
