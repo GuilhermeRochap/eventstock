@@ -25,7 +25,7 @@ O banco de dados é gerenciado pelo Supabase (Postgres), com schemas separados p
 
 ## Tecnologias
 
-- Backend: Node.js
+- Backend: Nest.js
 - Frontend: Angular / React (a definir)
 - Banco de dados: PostgreSQL via Supabase
 - Fila de eventos: Redis + Asynq
