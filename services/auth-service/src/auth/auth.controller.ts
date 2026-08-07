@@ -9,6 +9,8 @@ import { Roles } from './decorators/role.decorator';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { BecomeOrganizerDto } from './dto/become-organizer.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { CreateUserByAdminDto } from './dto/create-user-by-admin.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -45,6 +47,24 @@ export class AuthController {
     @Body() dto: BecomeOrganizerDto,
   ) {
     return this.authService.becomeOrganizer(req.user.userId, dto);
+  }
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(req.user.userId, dto.novaSenha);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Post('users')
+  async createUserByAdmin(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: CreateUserByAdminDto,
+  ) {
+    return this.authService.createUserByAdmin(req.user.companyId, dto);
   }
 
   @Post('refresh')

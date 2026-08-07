@@ -14,6 +14,8 @@ import { SignupDto } from './dto/signup.dto';
 import { hashToken } from './utils/token-rash.util';
 import { RedisService } from '../redis/redis.service';
 import { BecomeOrganizerDto } from './dto/become-organizer.dto';
+import { generateTempPassword } from './utils/generate-temp-password.utils';
+import { CreateUserByAdminDto } from './dto/create-user-by-admin.dto';
 
 @Injectable()
 export class AuthService {
@@ -44,6 +46,7 @@ export class AuthService {
   private async resetRateLimit(email: string): Promise<void> {
     await this.redis.client.del(`login_attempts:${email}`);
   }
+
   // SIGNUP
   async signup(dto: SignupDto) {
     const { data: existingUser } = await this.supabase.client
@@ -112,9 +115,55 @@ export class AuthService {
     const { senha_hash, ...userSemSenha } = user;
     return { user: userSemSenha };
   }
+
+  // CREATE USER BY ADMIN
+  async createUserByAdmin(
+    requestingAdminCompanyId: string | null,
+    dto: CreateUserByAdminDto,
+  ) {
+    if (!requestingAdminCompanyId) {
+      throw new ConflictException('Admin sem company associada');
+    }
+
+    const { data: existingUser } = await this.supabase.client
+      .from('users')
+      .select('id')
+      .eq('email', dto.email)
+      .maybeSingle();
+
+    if (existingUser) {
+      throw new ConflictException('E-mail já cadastrado');
+    }
+
+    const tempPassword = generateTempPassword();
+    const senhaHash = await bcrypt.hash(tempPassword, 10);
+
+    const { data: newUser, error } = await this.supabase.client
+      .from('users')
+      .insert({
+        nome: dto.nome,
+        email: dto.email,
+        senha_hash: senhaHash,
+        role: dto.role,
+        company_id: requestingAdminCompanyId,
+        senha_temporaria: true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Erro ao criar usuário: ${error.message}`);
+    }
+
+    const { senha_hash, ...userSemSenha } = newUser;
+
+    // Retornamos a senha temporária em TEXTO PURO só nessa resposta única —
+    // é a ÚNICA vez que ela existe em texto puro fora do processo de hash
+    return { user: userSemSenha, senhaTemporaria: tempPassword };
+  }
+
   // USER VIRA ADMIN (BECOME ORGANIZER)
   async becomeOrganizer(userId: string, dto: BecomeOrganizerDto) {
-    // Passo A: buscar o usuário atual, confirmar que ainda é 'user'
     const { data: currentUser } = await this.supabase.client
       .from('users')
       .select('*')
@@ -129,7 +178,6 @@ export class AuthService {
       throw new ConflictException('Usuário já possui papel organizacional');
     }
 
-    // Passo B: criar a company nova
     const { data: company, error: companyError } = await this.supabase.client
       .from('companies')
       .insert({ nome: dto.nomeCompany })
@@ -140,7 +188,6 @@ export class AuthService {
       throw new Error(`Erro ao criar company: ${companyError.message}`);
     }
 
-    // Passo C: atualizar o MESMO usuário (não cria um novo registro)
     const { data: updatedUser, error: updateError } = await this.supabase.client
       .from('users')
       .update({ role: 'admin', company_id: company.id })
@@ -149,7 +196,6 @@ export class AuthService {
       .single();
 
     if (updateError) {
-      // rollback: apaga a company se não conseguiu promover o usuário
       await this.supabase.client
         .from('companies')
         .delete()
@@ -157,7 +203,6 @@ export class AuthService {
       throw new Error(`Erro ao promover usuário: ${updateError.message}`);
     }
 
-    // Passo D: gera tokens NOVOS, já refletindo o role/company atualizados
     const tokens = await this.generateTokenPair(
       updatedUser.id,
       updatedUser.role,
@@ -166,9 +211,23 @@ export class AuthService {
 
     return { company, ...tokens };
   }
+
+  // CHANGE PASSWORD
+  async changePassword(userId: string, novaSenha: string) {
+    const novaSenhaHash = await bcrypt.hash(novaSenha, 10);
+
+    await this.supabase.client
+      .from('users')
+      .update({ senha_hash: novaSenhaHash, senha_temporaria: false })
+      .eq('id', userId);
+
+    return { message: 'Senha alterada com sucesso' };
+  }
+
   // LOGIN
   async login(dto: LoginDto) {
     await this.checkRateLimit(dto.email);
+
     const { data: user } = await this.supabase.client
       .from('users')
       .select('*')
@@ -186,8 +245,16 @@ export class AuthService {
     }
 
     await this.resetRateLimit(dto.email);
-    return this.generateTokenPair(user.id, user.role, user.company_id);
+
+    const tokens = await this.generateTokenPair(
+      user.id,
+      user.role,
+      user.company_id,
+    );
+
+    return { ...tokens, senhaTemporaria: user.senha_temporaria };
   }
+
   // LOGOUT
   async logout(refreshToken: string) {
     const tokenHash = hashToken(refreshToken);
@@ -200,7 +267,6 @@ export class AuthService {
       .maybeSingle();
 
     if (!storedToken) {
-      // o resultado final desejado (usuário deslogado) já está garantido
       return { message: 'Sessão encerrada' };
     }
 
@@ -212,6 +278,7 @@ export class AuthService {
     return { message: 'Sessão encerrada' };
   }
 
+  // REFRESH
   async refresh(refreshToken: string) {
     let payload: { sub: string; role: string; company_id: string | null };
     try {
