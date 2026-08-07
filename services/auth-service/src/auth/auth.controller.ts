@@ -4,6 +4,8 @@ import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthenticatedRequest } from './types/authenticated-request.type';
 import { SignupDto } from './dto/signup.dto';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/role.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -23,5 +25,14 @@ export class AuthController {
   @Get('me')
   me(@Req() req: AuthenticatedRequest) {
     return req.user;
+  }
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'manager')
+  @Get('organizer-only-test')
+  organizerOnlyTest(@Req() req: AuthenticatedRequest) {
+    return {
+      message: 'Acesso permitido apenas para organizador.',
+      user: req.user,
+    };
   }
 }
