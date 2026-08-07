@@ -79,7 +79,8 @@ export type Database = {
           id: string
           nome: string
           role: Database["public"]["Enums"]["user_role"]
-          senha_hash: string
+          senha_hash: string | null
+          senha_temporaria: boolean | null
         }
         Insert: {
           company_id?: string | null
@@ -89,7 +90,8 @@ export type Database = {
           id?: string
           nome: string
           role: Database["public"]["Enums"]["user_role"]
-          senha_hash: string
+          senha_hash?: string | null
+          senha_temporaria?: boolean | null
         }
         Update: {
           company_id?: string | null
@@ -99,7 +101,8 @@ export type Database = {
           id?: string
           nome?: string
           role?: Database["public"]["Enums"]["user_role"]
-          senha_hash?: string
+          senha_hash?: string | null
+          senha_temporaria?: boolean | null
         }
         Relationships: [
           {

@@ -13,6 +13,9 @@ import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 import { hashToken } from './utils/token-rash.util';
 import { RedisService } from '../redis/redis.service';
+import { BecomeOrganizerDto } from './dto/become-organizer.dto';
+import { generateTempPassword } from './utils/generate-temp-password.utils';
+import { CreateUserByAdminDto } from './dto/create-user-by-admin.dto';
 
 @Injectable()
 export class AuthService {
@@ -43,6 +46,42 @@ export class AuthService {
   private async resetRateLimit(email: string): Promise<void> {
     await this.redis.client.del(`login_attempts:${email}`);
   }
+
+  // LOGIN COM GOOGLE
+  async loginWithGoogle(googleUser: { email: string; nome: string }) {
+    const { data: existingUser } = await this.supabase.client
+      .from('users')
+      .select('*')
+      .eq('email', googleUser.email)
+      .maybeSingle();
+
+    if (existingUser) {
+      return this.generateTokenPair(
+        existingUser.id,
+        existingUser.role,
+        existingUser.company_id,
+      );
+    }
+
+    const { data: newUser, error } = await this.supabase.client
+      .from('users')
+      .insert({
+        nome: googleUser.nome,
+        email: googleUser.email,
+        senha_hash: null,
+        role: 'user',
+        company_id: null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Erro ao criar usuário via Google: ${error.message}`);
+    }
+
+    return this.generateTokenPair(newUser.id, newUser.role, newUser.company_id);
+  }
+
   // SIGNUP
   async signup(dto: SignupDto) {
     const { data: existingUser } = await this.supabase.client
@@ -111,9 +150,117 @@ export class AuthService {
     const { senha_hash, ...userSemSenha } = user;
     return { user: userSemSenha };
   }
+
+  // CREATE USER BY ADMIN
+  async createUserByAdmin(
+    requestingAdminCompanyId: string | null,
+    dto: CreateUserByAdminDto,
+  ) {
+    if (!requestingAdminCompanyId) {
+      throw new ConflictException('Admin sem company associada');
+    }
+
+    const { data: existingUser } = await this.supabase.client
+      .from('users')
+      .select('id')
+      .eq('email', dto.email)
+      .maybeSingle();
+
+    if (existingUser) {
+      throw new ConflictException('E-mail já cadastrado');
+    }
+
+    const tempPassword = generateTempPassword();
+    const senhaHash = await bcrypt.hash(tempPassword, 10);
+
+    const { data: newUser, error } = await this.supabase.client
+      .from('users')
+      .insert({
+        nome: dto.nome,
+        email: dto.email,
+        senha_hash: senhaHash,
+        role: dto.role,
+        company_id: requestingAdminCompanyId,
+        senha_temporaria: true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Erro ao criar usuário: ${error.message}`);
+    }
+
+    const { senha_hash, ...userSemSenha } = newUser;
+
+    return { user: userSemSenha, senhaTemporaria: tempPassword };
+  }
+
+  // USER VIRA ADMIN (BECOME ORGANIZER)
+  async becomeOrganizer(userId: string, dto: BecomeOrganizerDto) {
+    const { data: currentUser } = await this.supabase.client
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!currentUser) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+
+    if (currentUser.role !== 'user') {
+      throw new ConflictException('Usuário já possui papel organizacional');
+    }
+
+    const { data: company, error: companyError } = await this.supabase.client
+      .from('companies')
+      .insert({ nome: dto.nomeCompany })
+      .select()
+      .single();
+
+    if (companyError) {
+      throw new Error(`Erro ao criar company: ${companyError.message}`);
+    }
+
+    const { data: updatedUser, error: updateError } = await this.supabase.client
+      .from('users')
+      .update({ role: 'admin', company_id: company.id })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (updateError) {
+      await this.supabase.client
+        .from('companies')
+        .delete()
+        .eq('id', company.id);
+      throw new Error(`Erro ao promover usuário: ${updateError.message}`);
+    }
+
+    const tokens = await this.generateTokenPair(
+      updatedUser.id,
+      updatedUser.role,
+      updatedUser.company_id,
+    );
+
+    return { company, ...tokens };
+  }
+
+  // CHANGE PASSWORD
+  async changePassword(userId: string, novaSenha: string) {
+    const novaSenhaHash = await bcrypt.hash(novaSenha, 10);
+
+    await this.supabase.client
+      .from('users')
+      .update({ senha_hash: novaSenhaHash, senha_temporaria: false })
+      .eq('id', userId);
+
+    return { message: 'Senha alterada com sucesso' };
+  }
+
   // LOGIN
   async login(dto: LoginDto) {
     await this.checkRateLimit(dto.email);
+
     const { data: user } = await this.supabase.client
       .from('users')
       .select('*')
@@ -124,6 +271,12 @@ export class AuthService {
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
 
+    if (!user.senha_hash) {
+      throw new UnauthorizedException(
+        'Esta conta usa login via Google. Entre com sua conta Google.',
+      );
+    }
+
     const senhaValida = await bcrypt.compare(dto.senha, user.senha_hash);
 
     if (!senhaValida) {
@@ -131,8 +284,16 @@ export class AuthService {
     }
 
     await this.resetRateLimit(dto.email);
-    return this.generateTokenPair(user.id, user.role, user.company_id);
+
+    const tokens = await this.generateTokenPair(
+      user.id,
+      user.role,
+      user.company_id,
+    );
+
+    return { ...tokens, senhaTemporaria: user.senha_temporaria };
   }
+
   // LOGOUT
   async logout(refreshToken: string) {
     const tokenHash = hashToken(refreshToken);
@@ -145,7 +306,6 @@ export class AuthService {
       .maybeSingle();
 
     if (!storedToken) {
-      // o resultado final desejado (usuário deslogado) já está garantido
       return { message: 'Sessão encerrada' };
     }
 
@@ -157,6 +317,7 @@ export class AuthService {
     return { message: 'Sessão encerrada' };
   }
 
+  // REFRESH
   async refresh(refreshToken: string) {
     let payload: { sub: string; role: string; company_id: string | null };
     try {

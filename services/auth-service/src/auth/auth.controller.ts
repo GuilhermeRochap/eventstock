@@ -8,6 +8,10 @@ import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/role.decorator';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
+import { BecomeOrganizerDto } from './dto/become-organizer.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { CreateUserByAdminDto } from './dto/create-user-by-admin.dto';
+import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -21,6 +25,19 @@ export class AuthController {
   @Post('login')
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Get('google')
+  @UseGuards(AuthGuard('google'))
+  async googleAuth() {
+    // Essa função nunca executa de verdade — o Guard intercepta
+    // e redireciona o usuário pro Google antes de chegar aqui
+  }
+
+  @Get('google/callback')
+  @UseGuards(AuthGuard('google'))
+  googleAuthCallback(@Req() req: any) {
+    return this.authService.loginWithGoogle(req.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -37,6 +54,33 @@ export class AuthController {
       user: req.user,
     };
   }
+  @UseGuards(JwtAuthGuard)
+  @Post('become-organizer')
+  async becomeOrganizer(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: BecomeOrganizerDto,
+  ) {
+    return this.authService.becomeOrganizer(req.user.userId, dto);
+  }
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(req.user.userId, dto.novaSenha);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Post('users')
+  async createUserByAdmin(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: CreateUserByAdminDto,
+  ) {
+    return this.authService.createUserByAdmin(req.user.companyId, dto);
+  }
+
   @Post('refresh')
   async refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.refreshToken);
