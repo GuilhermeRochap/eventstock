@@ -18,7 +18,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
-
+  // SIGNUP
   async signup(dto: SignupDto) {
     const { data: existingUser } = await this.supabase.client
       .from('users')
@@ -86,7 +86,7 @@ export class AuthService {
     const { senha_hash, ...userSemSenha } = user;
     return { user: userSemSenha };
   }
-
+  // LOGIN
   async login(dto: LoginDto) {
     const { data: user } = await this.supabase.client
       .from('users')
@@ -105,6 +105,29 @@ export class AuthService {
     }
 
     return this.generateTokenPair(user.id, user.role, user.company_id);
+  }
+  // LOGOUT
+  async logout(refreshToken: string) {
+    const tokenHash = hashToken(refreshToken);
+
+    const { data: storedToken } = await this.supabase.client
+      .from('refresh_tokens')
+      .select('id')
+      .eq('token_hash', tokenHash)
+      .eq('revogado', false)
+      .maybeSingle();
+
+    if (!storedToken) {
+      // o resultado final desejado (usuário deslogado) já está garantido
+      return { message: 'Sessão encerrada' };
+    }
+
+    await this.supabase.client
+      .from('refresh_tokens')
+      .update({ revogado: true })
+      .eq('id', storedToken.id);
+
+    return { message: 'Sessão encerrada' };
   }
 
   async refresh(refreshToken: string) {
