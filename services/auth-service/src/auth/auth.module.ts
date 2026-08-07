@@ -5,9 +5,15 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SupabaseModule } from '../supabase/supabase.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
-  imports: [SupabaseModule, PassportModule, JwtModule.register({})],
+  imports: [
+    SupabaseModule,
+    PassportModule,
+    JwtModule.register({}),
+    RedisModule,
+  ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
 })
