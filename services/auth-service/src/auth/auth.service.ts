@@ -1,5 +1,7 @@
 import {
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -10,6 +12,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 import { hashToken } from './utils/token-rash.util';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class AuthService {
@@ -17,7 +20,29 @@ export class AuthService {
     private readonly supabase: SupabaseService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly redis: RedisService,
   ) {}
+
+  // Rate limit
+  private async checkRateLimit(email: string): Promise<void> {
+    const key = `login_attempts:${email}`;
+    const attempts = await this.redis.client.incr(key);
+
+    if (attempts === 1) {
+      await this.redis.client.expire(key, 15 * 60);
+    }
+
+    if (attempts > 5) {
+      throw new HttpException(
+        'Muitas tentativas de login. Tente novamente em alguns minutos.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async resetRateLimit(email: string): Promise<void> {
+    await this.redis.client.del(`login_attempts:${email}`);
+  }
   // SIGNUP
   async signup(dto: SignupDto) {
     const { data: existingUser } = await this.supabase.client
@@ -88,6 +113,7 @@ export class AuthService {
   }
   // LOGIN
   async login(dto: LoginDto) {
+    await this.checkRateLimit(dto.email);
     const { data: user } = await this.supabase.client
       .from('users')
       .select('*')
@@ -104,6 +130,7 @@ export class AuthService {
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
 
+    await this.resetRateLimit(dto.email);
     return this.generateTokenPair(user.id, user.role, user.company_id);
   }
   // LOGOUT
