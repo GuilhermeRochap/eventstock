@@ -47,6 +47,41 @@ export class AuthService {
     await this.redis.client.del(`login_attempts:${email}`);
   }
 
+  // LOGIN COM GOOGLE
+  async loginWithGoogle(googleUser: { email: string; nome: string }) {
+    const { data: existingUser } = await this.supabase.client
+      .from('users')
+      .select('*')
+      .eq('email', googleUser.email)
+      .maybeSingle();
+
+    if (existingUser) {
+      return this.generateTokenPair(
+        existingUser.id,
+        existingUser.role,
+        existingUser.company_id,
+      );
+    }
+
+    const { data: newUser, error } = await this.supabase.client
+      .from('users')
+      .insert({
+        nome: googleUser.nome,
+        email: googleUser.email,
+        senha_hash: null,
+        role: 'user',
+        company_id: null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Erro ao criar usuário via Google: ${error.message}`);
+    }
+
+    return this.generateTokenPair(newUser.id, newUser.role, newUser.company_id);
+  }
+
   // SIGNUP
   async signup(dto: SignupDto) {
     const { data: existingUser } = await this.supabase.client
@@ -157,8 +192,6 @@ export class AuthService {
 
     const { senha_hash, ...userSemSenha } = newUser;
 
-    // Retornamos a senha temporária em TEXTO PURO só nessa resposta única —
-    // é a ÚNICA vez que ela existe em texto puro fora do processo de hash
     return { user: userSemSenha, senhaTemporaria: tempPassword };
   }
 
@@ -236,6 +269,12 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('E-mail ou senha inválidos');
+    }
+
+    if (!user.senha_hash) {
+      throw new UnauthorizedException(
+        'Esta conta usa login via Google. Entre com sua conta Google.',
+      );
     }
 
     const senhaValida = await bcrypt.compare(dto.senha, user.senha_hash);

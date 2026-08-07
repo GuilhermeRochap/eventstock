@@ -11,6 +11,7 @@ import { LogoutDto } from './dto/logout.dto';
 import { BecomeOrganizerDto } from './dto/become-organizer.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserByAdminDto } from './dto/create-user-by-admin.dto';
+import { AuthGuard } from '@nestjs/passport/dist/auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -24,6 +25,19 @@ export class AuthController {
   @Post('login')
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Get('google')
+  @UseGuards(AuthGuard('google'))
+  async googleAuth() {
+    // Essa função nunca executa de verdade — o Guard intercepta
+    // e redireciona o usuário pro Google antes de chegar aqui
+  }
+
+  @Get('google/callback')
+  @UseGuards(AuthGuard('google'))
+  googleAuthCallback(@Req() req: any) {
+    return this.authService.loginWithGoogle(req.user);
   }
 
   @UseGuards(JwtAuthGuard)
