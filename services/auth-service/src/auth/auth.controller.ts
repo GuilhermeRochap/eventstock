@@ -6,6 +6,7 @@ import { AuthenticatedRequest } from './types/authenticated-request.type';
 import { SignupDto } from './dto/signup.dto';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/role.decorator';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -34,5 +35,9 @@ export class AuthController {
       message: 'Acesso permitido apenas para organizador.',
       user: req.user,
     };
+  }
+  @Post('refresh')
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refreshToken);
   }
 }

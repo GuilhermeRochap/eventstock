@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { SupabaseService } from '../supabase/supabase.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
+import { hashToken } from './utils/token-rash.util';
 
 @Injectable()
 export class AuthService {
@@ -17,8 +18,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
+
   async signup(dto: SignupDto) {
-    // Passo A: checar e-mail duplicado
     const { data: existingUser } = await this.supabase.client
       .from('users')
       .select('id')
@@ -31,7 +32,6 @@ export class AuthService {
 
     const senhaHash = await bcrypt.hash(dto.senha, 10);
 
-    // Caminho A: virar organizador direto no cadastro
     if (dto.nomeCompany) {
       const { data: company, error: companyError } = await this.supabase.client
         .from('companies')
@@ -67,7 +67,6 @@ export class AuthService {
       return { company, user: adminSemSenha };
     }
 
-    // Caminho B: comprador comum
     const { data: user, error } = await this.supabase.client
       .from('users')
       .insert({
@@ -87,9 +86,8 @@ export class AuthService {
     const { senha_hash, ...userSemSenha } = user;
     return { user: userSemSenha };
   }
-  //  LOGIN
+
   async login(dto: LoginDto) {
-    // Passo A.1: buscar o usuário pelo e-mail
     const { data: user } = await this.supabase.client
       .from('users')
       .select('*')
@@ -100,30 +98,75 @@ export class AuthService {
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
 
-    // Passo B.1: comparar a senha enviada com o hash salvo
     const senhaValida = await bcrypt.compare(dto.senha, user.senha_hash);
 
     if (!senhaValida) {
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
 
-    // Passo C.1: montar o payload do token (o que vai dentro do JWT)
-    const payload = {
-      sub: user.id,
-      role: user.role,
-      company_id: user.company_id,
-    };
+    return this.generateTokenPair(user.id, user.role, user.company_id);
+  }
 
-    // Passo D.1: gerar o access token (curto, ex: 15min)
+  async refresh(refreshToken: string) {
+    let payload: { sub: string; role: string; company_id: string | null };
+    try {
+      payload = this.jwtService.verify(refreshToken, {
+        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Refresh token inválido ou expirado');
+    }
+
+    const tokenHash = hashToken(refreshToken);
+
+    const { data: storedToken } = await this.supabase.client
+      .from('refresh_tokens')
+      .select('*')
+      .eq('token_hash', tokenHash)
+      .eq('user_id', payload.sub)
+      .eq('revogado', false)
+      .maybeSingle();
+
+    if (!storedToken) {
+      throw new UnauthorizedException('Refresh token inválido ou já utilizado');
+    }
+
+    await this.supabase.client
+      .from('refresh_tokens')
+      .update({ revogado: true })
+      .eq('id', storedToken.id);
+
+    return this.generateTokenPair(
+      payload.sub,
+      payload.role,
+      payload.company_id,
+    );
+  }
+
+  private async generateTokenPair(
+    userId: string,
+    role: string,
+    companyId: string | null,
+  ) {
+    const payload = { sub: userId, role, company_id: companyId };
+
     const accessToken = this.jwtService.sign(payload, {
       secret: this.configService.get<string>('JWT_SECRET'),
       expiresIn: '15m',
     });
 
-    // Passo E: gerar o refresh token (longo, ex: 7 dias)
     const refreshToken = this.jwtService.sign(payload, {
       secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       expiresIn: '7d',
+    });
+
+    const expiraEm = new Date();
+    expiraEm.setDate(expiraEm.getDate() + 7);
+
+    await this.supabase.client.from('refresh_tokens').insert({
+      user_id: userId,
+      token_hash: hashToken(refreshToken),
+      expira_em: expiraEm.toISOString(),
     });
 
     return { accessToken, refreshToken };
