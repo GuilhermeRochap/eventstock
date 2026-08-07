@@ -7,6 +7,7 @@ import { SignupDto } from './dto/signup.dto';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/role.decorator';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -39,5 +40,9 @@ export class AuthController {
   @Post('refresh')
   async refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.refreshToken);
+  }
+  @Post('logout')
+  async logout(@Body() dto: LogoutDto) {
+    return this.authService.logout(dto.refreshToken);
   }
 }
