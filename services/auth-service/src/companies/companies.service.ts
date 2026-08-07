@@ -1,12 +1,18 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanySettingsDto } from './dto/update-company-settings.dto';
 
 @Injectable()
 export class CompaniesService {
   constructor(private readonly supabase: SupabaseService) {}
 
+  // Cria a Company e o Admin (user) associado a ela
   async createCompanyWithAdmin(dto: CreateCompanyDto) {
     const { data: existingUser } = await this.supabase.client
       .from('users')
@@ -52,5 +58,33 @@ export class CompaniesService {
 
     const { senha_hash, ...adminSemSenha } = admin;
     return { company, admin: adminSemSenha };
+  }
+  // Atualiza as configurações da Company, apenas se o usuário que está fazendo a requisição for admin da própria company
+  async updateSettings(
+    companyId: string,
+    requestingUserCompanyId: string | null,
+    dto: UpdateCompanySettingsDto,
+  ) {
+    // isolamento: admin só mexe na PRÓPRIA company
+    if (companyId !== requestingUserCompanyId) {
+      throw new ForbiddenException(
+        'Você não pode alterar configurações de outra empresa',
+      );
+    }
+
+    const { data: company, error } = await this.supabase.client
+      .from('companies')
+      .update({
+        configuracoes: { requer_aprovacao_email: dto.requerAprovacaoEmail },
+      })
+      .eq('id', companyId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Erro ao atualizar configurações: ${error.message}`);
+    }
+
+    return company;
   }
 }

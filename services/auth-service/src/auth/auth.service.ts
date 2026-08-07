@@ -13,6 +13,7 @@ import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 import { hashToken } from './utils/token-rash.util';
 import { RedisService } from '../redis/redis.service';
+import { BecomeOrganizerDto } from './dto/become-organizer.dto';
 
 @Injectable()
 export class AuthService {
@@ -110,6 +111,60 @@ export class AuthService {
 
     const { senha_hash, ...userSemSenha } = user;
     return { user: userSemSenha };
+  }
+  // USER VIRA ADMIN (BECOME ORGANIZER)
+  async becomeOrganizer(userId: string, dto: BecomeOrganizerDto) {
+    // Passo A: buscar o usuário atual, confirmar que ainda é 'user'
+    const { data: currentUser } = await this.supabase.client
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!currentUser) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+
+    if (currentUser.role !== 'user') {
+      throw new ConflictException('Usuário já possui papel organizacional');
+    }
+
+    // Passo B: criar a company nova
+    const { data: company, error: companyError } = await this.supabase.client
+      .from('companies')
+      .insert({ nome: dto.nomeCompany })
+      .select()
+      .single();
+
+    if (companyError) {
+      throw new Error(`Erro ao criar company: ${companyError.message}`);
+    }
+
+    // Passo C: atualizar o MESMO usuário (não cria um novo registro)
+    const { data: updatedUser, error: updateError } = await this.supabase.client
+      .from('users')
+      .update({ role: 'admin', company_id: company.id })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (updateError) {
+      // rollback: apaga a company se não conseguiu promover o usuário
+      await this.supabase.client
+        .from('companies')
+        .delete()
+        .eq('id', company.id);
+      throw new Error(`Erro ao promover usuário: ${updateError.message}`);
+    }
+
+    // Passo D: gera tokens NOVOS, já refletindo o role/company atualizados
+    const tokens = await this.generateTokenPair(
+      updatedUser.id,
+      updatedUser.role,
+      updatedUser.company_id,
+    );
+
+    return { company, ...tokens };
   }
   // LOGIN
   async login(dto: LoginDto) {

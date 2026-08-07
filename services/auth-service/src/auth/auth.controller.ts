@@ -8,6 +8,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/role.decorator';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
+import { BecomeOrganizerDto } from './dto/become-organizer.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -37,6 +38,15 @@ export class AuthController {
       user: req.user,
     };
   }
+  @UseGuards(JwtAuthGuard)
+  @Post('become-organizer')
+  async becomeOrganizer(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: BecomeOrganizerDto,
+  ) {
+    return this.authService.becomeOrganizer(req.user.userId, dto);
+  }
+
   @Post('refresh')
   async refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.refreshToken);
